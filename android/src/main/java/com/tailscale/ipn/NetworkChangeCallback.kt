@@ -9,6 +9,7 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.util.Log
 import com.tailscale.ipn.util.TSLog
+import java.net.Inet4Address
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import libtailscale.Libtailscale
@@ -71,6 +72,33 @@ object NetworkChangeCallback {
 
   @Volatile private var underlyingNetworkListener: ((Network?) -> Unit)? = null
 
+  // House build: the home Wi-Fi, recognised by an IPv4 address in one of these subnets. It has no
+  // internet (router rule), so Android keeps LTE as the default; App.bindSocketToNetwork puts
+  // Tailscale's UDP on this network while it's up so house peers are reached over the LAN.
+  private val HOME_SUBNETS = listOf("192.168.8.")
+
+  @Volatile
+  var homeWifiNetwork: Network? = null
+    private set
+
+  private fun recomputeHomeWifiLocked(why: String) {
+    val home =
+        activeNetworks.entries
+            .firstOrNull { (_, info) ->
+              info.caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                  info.linkProps?.linkAddresses?.any { la ->
+                    val a = la.address
+                    a is Inet4Address && HOME_SUBNETS.any { a.hostAddress?.startsWith(it) == true }
+                  } == true
+            }
+            ?.key
+    if (home != homeWifiNetwork) {
+      homeWifiNetwork = home
+      TSLog.d(TAG, "$why: home Wi-Fi is now ${home ?: "gone"}; rebinding sockets")
+      Libtailscale.requestRebind()
+    }
+  }
+
   fun setUnderlyingNetworkListener(listener: ((Network?) -> Unit)?) {
     underlyingNetworkListener = listener
   }
@@ -115,6 +143,7 @@ object NetworkChangeCallback {
 
             lock.withLock {
               activeNetworks[network]?.caps = capabilities
+              recomputeHomeWifiLocked("onCapabilitiesChanged")
 
               if (recomputeDefaultNetworkLocked("onCapabilitiesChanged")) {
                 maybeUpdateDNSConfig("onCapabilitiesChanged", dns)
@@ -127,6 +156,7 @@ object NetworkChangeCallback {
 
             lock.withLock {
               activeNetworks[network]?.linkProps = linkProperties
+              recomputeHomeWifiLocked("onLinkPropertiesChanged")
               recomputeDefaultNetworkLocked("onLinkPropertiesChanged")
               maybeUpdateDNSConfig("onLinkPropertiesChanged", dns)
             }
@@ -139,6 +169,7 @@ object NetworkChangeCallback {
 
             lock.withLock {
               activeNetworks.remove(network)
+              recomputeHomeWifiLocked("onLost")
               recomputeDefaultNetworkLocked("onLost")
               maybeUpdateDNSConfig("onLost", dns)
             }

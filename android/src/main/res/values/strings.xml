@@ -30,7 +30,7 @@
     <string name="cancel">Cancel</string>
 
     <!-- Strings for the about screen -->
-    <string name="app_name" translatable="false">Tailscale</string>
+    <string name="app_name" translatable="false">Tailscale (house)</string>
     <string name="tile_name" translatable="false">Tailscale</string>
     <string name="version">Version</string>
     <string name="about_view_header">About Tailscale</string>

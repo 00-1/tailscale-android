@@ -1,0 +1,47 @@
+name: House build
+
+# The house's own Tailscale (app id com.tailscale.ipn.house, installs next to the Play Store one):
+# UDP goes over the home Wi-Fi when the phone is on it (see NetworkChangeCallback.homeWifiNetwork).
+on:
+  push:
+    branches: [house]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        with:
+          go-version-file: "go.mod"
+      - uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
+        with:
+          distribution: "temurin"
+          java-version: "21"
+      - name: Signing key
+        env:
+          KS_B64: ${{ secrets.HOUSE_KS_P12B64 }}
+        run: echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/house.p12"
+      - name: Build APK
+        env:
+          HOUSE_KS_PASS: ${{ secrets.HOUSE_KS_PASS }}
+        run: HOUSE_KEYSTORE="$RUNNER_TEMP/house.p12" make tailscale-debug.apk
+      - name: Check the signature is the house key
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs tailscale-debug.apk | grep -i "SHA-256 digest" | head -1
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(grep -oP 'VERSION_LONG="\K[^"]+' tailscale.version || echo unknown)
+          cp tailscale-debug.apk "tailscale-house.apk"
+          gh release create "house-${{ github.run_number }}" tailscale-house.apk \
+            --title "House build ${{ github.run_number }} ($V)" \
+            --notes "Tailscale $V with UDP over the home Wi-Fi. Commit ${{ github.sha }}."

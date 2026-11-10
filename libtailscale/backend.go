@@ -326,6 +326,10 @@ func (a *App) runBackend(ctx context.Context, hardwareAttestation bool) error {
 			case dnsRefresh <- struct{}{}:
 			default:
 			}
+		case <-rebindRequests:
+			// house build: the home Wi-Fi came or went (see NetworkChangeCallback.homeWifiNetwork)
+			log.Printf("house: home Wi-Fi changed, rebinding sockets")
+			b.backend.DebugRebind()
 		}
 	}
 }

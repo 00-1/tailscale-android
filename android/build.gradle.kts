@@ -23,6 +23,8 @@ android {
     minSdk = 26
     targetSdk = providers.gradleProperty("androidApiLevel").get().toInt()
 
+    // House build: its own package, so it installs next to the Play Store Tailscale.
+    applicationId = "com.tailscale.ipn.house"
     versionCode = computeVersionCode()
     versionName = getVersionProperty("VERSION_LONG")
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -49,8 +51,22 @@ android {
   flavorDimensions += "version"
   namespace = "com.tailscale.ipn"
 
+  // House build: a fixed key (GitHub secret) so each build updates the last one.
+  signingConfigs {
+    create("house") {
+      storeFile = file(System.getenv("HOUSE_KEYSTORE") ?: "house.p12")
+      storeType = "pkcs12"
+      storePassword = System.getenv("HOUSE_KS_PASS")
+      keyAlias = "house"
+      keyPassword = System.getenv("HOUSE_KS_PASS")
+    }
+  }
+
   buildTypes {
-    debug { manifestPlaceholders["leanbackRequired"] = isTV() }
+    debug {
+      manifestPlaceholders["leanbackRequired"] = isTV()
+      if (System.getenv("HOUSE_KS_PASS") != null) signingConfig = signingConfigs.getByName("house")
+    }
 
     release {
       manifestPlaceholders["leanbackRequired"] = isTV()

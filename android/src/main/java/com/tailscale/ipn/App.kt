@@ -505,6 +505,35 @@ class App : UninitializedApp(), libtailscale.AppContext, ViewModelStoreOwner {
   }
 
   override fun bindSocketToNetwork(fd: Int): Boolean {
+    // House build: while the phone is on the home Wi-Fi (LAN only, so Android keeps LTE as the
+    // default network), put UDP sockets (WireGuard + disco) on that Wi-Fi so peers in the house are
+    // reached directly over the LAN instead of through DERP over LTE. TCP (control, DERP, logs)
+    // falls through to the default network below, so login and relays keep working.
+    NetworkChangeCallback.homeWifiNetwork?.let { home ->
+      try {
+        val onWifi =
+            android.os.ParcelFileDescriptor.fromFd(fd).use { pfd ->
+              val type =
+                  android.system.Os.getsockoptInt(
+                      pfd.fileDescriptor,
+                      android.system.OsConstants.SOL_SOCKET,
+                      android.system.OsConstants.SO_TYPE,
+                  )
+              if (type == android.system.OsConstants.SOCK_DGRAM) {
+                home.bindSocket(pfd.fileDescriptor)
+                true
+              } else {
+                false
+              }
+            }
+        if (onWifi) {
+          TSLog.d(TAG, "bindSocketToNetwork: UDP fd=$fd on home Wi-Fi $home")
+          return true
+        }
+      } catch (e: Exception) {
+        TSLog.w(TAG, "bindSocketToNetwork: home Wi-Fi bind failed fd=$fd: $e")
+      }
+    }
     val net =
         NetworkChangeCallback.cachedDefaultNetwork
             ?: run {
