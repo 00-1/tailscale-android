@@ -1,0 +1,5 @@
+# The upstream tailscale-android commit or tag the house commits are built on (see house-build/apply.sh).
+# The daily House build moves this to each newer stable Tailscale release (even minor: 1.106, 1.108, ...) once the
+# house commits apply and build on it. Sourced by bash: ref = tag or commit, version = its Tailscale VERSION_SHORT.
+ref=67ca022e4345a6d05d5388752540ac436d2f78ba
+version=1.105.228

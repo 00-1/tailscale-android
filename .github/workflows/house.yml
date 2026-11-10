@@ -2,13 +2,32 @@ name: House build
 
 # The house's own Tailscale (app id com.tailscale.ipn.house, installs next to the Play Store one):
 # UDP goes over the home Wi-Fi when the phone is on it (see NetworkChangeCallback.homeWifiNetwork).
+#
+# Branch `house` = upstream + the house commits (subjects start "House build") + house-build/BASE, the upstream commit or tag
+# to build on. Every build checks out BASE and cherry-picks the house commits onto it (house-build/apply.sh), so moving to a
+# new Tailscale release never needs a force-push.
+# Daily: if Tailscale has a newer STABLE release (even minor: 1.106, 1.108, ...) than BASE, build on it; when that
+# works, release it and move house-build/BASE there (a "House base:" commit). If the house commits don't apply or the build
+# breaks, the run fails and BASE stays where it was (GitHub emails; the Wyse's phone-app-update flags it as well).
+# The house Wyse mirrors each release (house-apps-sync) and installs it on the phone when it is idle on the home Wi-Fi.
 on:
   push:
     branches: [house]
+  schedule:
+    - cron: "17 5 * * *"
   workflow_dispatch:
+    inputs:
+      base:
+        description: "Upstream tag or commit to build on and move house-build/BASE to (empty = newest stable release if newer, else house-build/BASE)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
+
+concurrency:
+  group: house-build
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -16,32 +35,74 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          ref: house
           fetch-depth: 0
+      - name: Pick the upstream base
+        id: base
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_BASE: ${{ github.event.inputs.base }}
+        run: |
+          git fetch -q --tags https://github.com/tailscale/tailscale-android.git
+          . house-build/BASE
+          NEWEST=$(git tag -l '1.*' | grep -E '^1\.[0-9]*[02468]\.[0-9]+-' | sort -V | tail -1)
+          NEWEST_VER=${NEWEST%%-*}
+          echo "house-build/BASE: $ref ($version); newest stable Tailscale release: $NEWEST"
+          newer() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]; }
+          if [ -n "$INPUT_BASE" ]; then REF=$INPUT_BASE; MOVE=yes
+          elif [ -n "$NEWEST" ] && newer "$NEWEST_VER" "$version"; then REF=$NEWEST; MOVE=yes
+          elif [ "$EVENT" = schedule ]; then echo "Nothing new upstream."; echo "build=no" >> "$GITHUB_OUTPUT"; exit 0
+          else REF=$ref; MOVE=no; fi
+          echo "Building on $REF (move house-build/BASE: $MOVE)"
+          { echo "build=yes"; echo "ref=$REF"; echo "move=$MOVE"; echo "house=$(git rev-parse HEAD)"; } >> "$GITHUB_OUTPUT"
+      - name: Apply the house commits
+        if: steps.base.outputs.build == 'yes'
+        run: |
+          cp house-build/apply.sh "$RUNNER_TEMP/apply.sh"
+          bash "$RUNNER_TEMP/apply.sh" "${{ steps.base.outputs.ref }}" house
       - uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        if: steps.base.outputs.build == 'yes'
         with:
           go-version-file: "go.mod"
       - uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
+        if: steps.base.outputs.build == 'yes'
         with:
           distribution: "temurin"
           java-version: "21"
       - name: Signing key
+        if: steps.base.outputs.build == 'yes'
         env:
           KS_B64: ${{ secrets.HOUSE_KS_P12B64 }}
         run: echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/house.p12"
       - name: Build APK
+        if: steps.base.outputs.build == 'yes'
         env:
           HOUSE_KS_PASS: ${{ secrets.HOUSE_KS_PASS }}
         run: HOUSE_KEYSTORE="$RUNNER_TEMP/house.p12" GOMOBILE_TARGET=android/arm64 make tailscale-debug.apk
       - name: Check the signature is the house key
+        if: steps.base.outputs.build == 'yes'
         run: |
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
-          "$APKSIGNER" verify --print-certs tailscale-debug.apk | grep -i "SHA-256 digest" | head -1
+          "$APKSIGNER" verify --print-certs tailscale-debug.apk | grep -i "SHA-256 digest" | head -1 | tee "$RUNNER_TEMP/cert"
+          grep -qi "b9341cdfcf506ef83c2f4fc3903a715b1d52494f37a74102633765f13f059274" "$RUNNER_TEMP/cert" \
+            || { echo "::error::APK is not signed with the house key"; exit 1; }
       - name: Release
+        if: steps.base.outputs.build == 'yes'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           V=$(grep -oP 'VERSION_LONG="\K[^"]+' tailscale.version || echo unknown)
           cp tailscale-debug.apk "tailscale-house.apk"
-          gh release create "house-${{ github.run_number }}" tailscale-house.apk \
+          gh release create "house-${{ github.run_number }}" tailscale-house.apk --target "${{ steps.base.outputs.house }}" \
             --title "House build ${{ github.run_number }} ($V)" \
-            --notes "Tailscale $V with UDP over the home Wi-Fi. Commit ${{ github.sha }}."
+            --notes "Tailscale $V with UDP over the home Wi-Fi: upstream ${{ steps.base.outputs.ref }} + the house commits of ${{ steps.base.outputs.house }}."
+      - name: Move house-build/BASE
+        if: steps.base.outputs.build == 'yes' && steps.base.outputs.move == 'yes'
+        run: |
+          VER=$(grep -oP 'VERSION_SHORT="\K[^"]+' tailscale.version)
+          REF="${{ steps.base.outputs.ref }}"
+          git checkout -q -f house
+          sed -i "s|^ref=.*|ref=$REF|; s|^version=.*|version=$VER|" house-build/BASE
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "House base: $REF ($VER)" house-build/BASE
+          git push origin house
