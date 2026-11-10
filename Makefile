@@ -58,6 +58,8 @@ export VERSION_CODE_BASE
 # Define output filenames.
 LIBTAILSCALE_AAR := android/libs/libtailscale.aar
 UNSTRIPPED_AAR := android/libs/libtailscale_unstripped.aar
+# house build sets android/arm64: one stripped library instead of four (155 MB -> a fraction)
+GOMOBILE_TARGET ?= android
 ARM64_SO_PATH := jni/arm64-v8a/libgojni.so
 
 # Compute an absolute path for the unstripped AAR.
@@ -229,7 +231,7 @@ build-unstripped-aar: tailscale.version $(GOBIN)/gomobile
 	rm -f $(ABS_UNSTRIPPED_AAR)
 	# The -linkmode=external -extldflags=-Wl,-z,max-page-size=16384 is specific to NDK 23
 	# to support 16kb page sizes.  Your mileage may vary with other NDK versions.
-	$(GOBIN)/gomobile bind -target android -androidapi 26 \
+	$(GOBIN)/gomobile bind -target $(GOMOBILE_TARGET) -androidapi 26 \
 		-tags "$$(./build-tags.sh) $(GOMOBILE_BUILD_TAGS)" \
 		-ldflags "-linkmode=external -extldflags=-Wl,-z,max-page-size=16384 $$(./version-ldflags.sh)" \
 		-o $(ABS_UNSTRIPPED_AAR) ./libtailscale || { echo "gomobile bind failed"; exit 1; }

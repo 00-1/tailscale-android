@@ -31,7 +31,7 @@ jobs:
       - name: Build APK
         env:
           HOUSE_KS_PASS: ${{ secrets.HOUSE_KS_PASS }}
-        run: HOUSE_KEYSTORE="$RUNNER_TEMP/house.p12" make tailscale-debug.apk
+        run: HOUSE_KEYSTORE="$RUNNER_TEMP/house.p12" GOMOBILE_TARGET=android/arm64 make tailscale-debug.apk
       - name: Check the signature is the house key
         run: |
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
