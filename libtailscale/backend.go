@@ -16,6 +16,7 @@ import (
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
+	"syscall"
 
 	"tailscale.com/drive/driveimpl"
 	_ "tailscale.com/feature/condregister"
@@ -271,6 +272,11 @@ func (a *App) runBackend(ctx context.Context, hardwareAttestation bool) error {
 				return nil // even on error. see big TODO above.
 			})
 			netns.SetAndroidBindToNetworkFunc(func(fd int) error {
+				// house build: UDP (WireGuard + disco) goes over the home Wi-Fi when the phone is on it
+				if t, err := syscall.GetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_TYPE); err == nil &&
+					t == syscall.SOCK_DGRAM && a.appCtx.BindSocketToHomeWifi(int32(fd)) {
+					return nil
+				}
 				if ok := a.appCtx.BindSocketToNetwork(int32(fd)); !ok {
 					log.Printf("[unexpected] IPNService.bindSocketToNetwork(%d) returned false", fd)
 				}
