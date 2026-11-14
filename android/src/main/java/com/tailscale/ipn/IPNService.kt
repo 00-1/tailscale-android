@@ -194,6 +194,11 @@ open class IPNService : VpnService(), libtailscale.IPNService {
             .setConfigureIntent(configIntent())
             .allowFamily(OsConstants.AF_INET)
             .allowFamily(OsConstants.AF_INET6)
+    // House build: bypassable, so an app that explicitly picks a network can still use it while
+    // Tailscale is on: gadget apps (WiZ etc.) bind to the home Wi-Fi or a bulb's setup hotspot, and
+    // under a non-bypassable VPN Android refuses that with EPERM. Everything else (the default route,
+    // so internet on LTE, and the tailnet/house routes) still goes through the VPN as before.
+    b.allowBypass()
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       b.setMetered(false) // Inherit the metered status from the underlying networks.
     }

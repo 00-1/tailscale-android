@@ -328,20 +328,6 @@ func (d *multiTUN) File() *os.File {
 }
 
 func (d *multiTUN) Read(slab []byte, packets []tun.ReadPacket) (int, error) {
-	// house build: home-LAN UDP is taken out of the tunnel at home (see houselan.go); read again if
-	// that was all this read returned.
-	for {
-		n, err := d.read(slab, packets)
-		if err != nil || n == 0 {
-			return n, err
-		}
-		if n = houseLANFwd.filter(slab, packets, n); n > 0 {
-			return n, nil
-		}
-	}
-}
-
-func (d *multiTUN) read(slab []byte, packets []tun.ReadPacket) (int, error) {
 	r := make(chan ioReply)
 	select {
 	// We don't care about d.downCh here, as it's fine
