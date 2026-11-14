@@ -292,6 +292,7 @@ func (a *App) runBackend(ctx context.Context, hardwareAttestation bool) error {
 			// which restores connectivity.
 			// See https://github.com/tailscale/corp/issues/13814
 			b.backend.DebugRebind()
+			houseLANFwd.recheck("VPN started")
 
 			vpnService.service = s
 
@@ -336,6 +337,7 @@ func (a *App) runBackend(ctx context.Context, hardwareAttestation bool) error {
 			// house build: the home Wi-Fi came or went (see NetworkChangeCallback.homeWifiNetwork)
 			log.Printf("house: home Wi-Fi changed, rebinding sockets")
 			b.backend.DebugRebind()
+			houseLANFwd.recheck("home Wi-Fi changed")
 		}
 	}
 }
@@ -369,6 +371,11 @@ func (a *App) newBackend(dataDir string, appCtx AppContext, store *stateStore,
 		appCtx:   appCtx,
 		bus:      sys.Bus.Get(),
 	}
+	// house build: home-LAN UDP over the home Wi-Fi (houselan.go)
+	houseLANFwd.setup(
+		func(fd int) bool { return appCtx.BindSocketToHomeWifi(int32(fd)) },
+		func(pkt []byte) error { _, err := b.devices.Write([][]byte{pkt}, packetHeadroom); return err },
+	)
 
 	var logID logid.PrivateID
 	logID.UnmarshalText([]byte("dead0000dead0000dead0000dead0000dead0000dead0000dead0000dead0000"))
